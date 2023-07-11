@@ -13,7 +13,7 @@ BuildRequires:  golang >= %{go_version}
 BuildRequires:  git
 
 %description
-gpt-telegram-bot is a cli tool to use open ai chat models.
+gpt-telegram-bot is a telegram chat bot that connects to OpenAI's chat APIs
 
 %global debug_package %{nil}
 
