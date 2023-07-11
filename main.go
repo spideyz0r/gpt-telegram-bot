@@ -99,6 +99,7 @@ func runConversation(userID int64, telegramBot *tgbotapi.BotAPI, conversation ch
 	if err != nil {
 		log.Fatal(err)
 	}
+	log.Printf("Model: %s, Temperature: %f", model, t)
 
 	for {
 		userMessage := <-conversation
@@ -112,7 +113,7 @@ func runConversation(userID int64, telegramBot *tgbotapi.BotAPI, conversation ch
 			command := re.FindString(userMessage)
 			args := re.ReplaceAllString(userMessage, "")
 			log.Printf("New command received %s: command: %s args: %s", userID, command, args)
-			botMessage, messages = runCommands(command, args, messages)
+			botMessage, messages, t = runCommands(command, args, messages, t, model)
 
 		} else {
 			messages = append(messages, openai.Message{
@@ -142,20 +143,36 @@ func runConversation(userID int64, telegramBot *tgbotapi.BotAPI, conversation ch
 	}
 }
 
-func runCommands(command string, args string, messages []openai.Message) (string, []openai.Message) {
+func runCommands(command string, args string, messages []openai.Message, temperature float64, model string) (string, []openai.Message, float64) {
 	var botMsg string
 	var commands = map[string]string{
 		"/help":  "show this help",
 		"/reset": "restart the conversation",
 		"/role":  "set the system role",
 		"/temperature":  "model's temperature",
+		"/info":  "information about the bot",
 	}
 
 	switch command {
+	case "/info": {
+		botMsg = fmt.Sprintf("Model: %s\nTemperature: %f\nSystem role: %s", model, temperature, messages[0].Content)
+		return botMsg, messages, temperature
+	}
+	case "/temperature":
+		if args == "" {
+			botMsg = "Syntax is /temperature <float>. What sampling temperature to use, between 0 and 2. Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic. 0.8 is the default."
+			return botMsg, messages, temperature
+		}
+		t, err := strconv.ParseFloat(strings.TrimSpace(args), 32)
+		if err != nil {
+			log.Fatal("Error parsing temperature: %s", err)
+		}
+		temperature = t
+		botMsg = fmt.Sprintf("Temperature set to %f", temperature)
 	case "/role":
 		if args == "" {
 			botMsg = "Syntax is /role <role>"
-			return botMsg, messages
+			return botMsg, messages, temperature
 		}
 		messages[0] = openai.Message{
 			Role:    "system",
@@ -176,7 +193,7 @@ func runCommands(command string, args string, messages []openai.Message) (string
 			botMsg += fmt.Sprintf("%s: %s\n", k, v)
 		}
 	}
-	return botMsg, messages
+	return botMsg, messages, temperature
 }
 
 func readWhiteList(whitelist *map[int64]bool, file_path string) {
