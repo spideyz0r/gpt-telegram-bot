@@ -85,6 +85,7 @@ func main() {
 func runConversation(userID int64, telegramBot *tgbotapi.BotAPI, conversation chan string, debug bool, model string, temperature string, apiKey string) {
 	var openai_client *openai.OpenAIClient
 	var botMessage string
+	user_id_text := strconv.FormatInt(userID, 10)
 
 	openai_client = openai.NewOpenAIClient(apiKey)
 
@@ -103,7 +104,7 @@ func runConversation(userID int64, telegramBot *tgbotapi.BotAPI, conversation ch
 
 	for {
 		userMessage := <-conversation
-		log.Printf("New message from user %i: %s", userID, userMessage)
+		log.Printf("New message from user %s: %s", user_id_text, userMessage)
 		if debug {
 			log.Printf("Messages m1: %v", messages)
 		}
@@ -112,7 +113,7 @@ func runConversation(userID int64, telegramBot *tgbotapi.BotAPI, conversation ch
 			re := regexp.MustCompile(`^/[^ ]+`)
 			command := re.FindString(userMessage)
 			args := re.ReplaceAllString(userMessage, "")
-			log.Printf("New command received %s: command: %s args: %s", userID, command, args)
+			log.Printf("New command received %s: command: %s args: %s", user_id_text, command, args)
 			botMessage, messages, t = runCommands(command, args, messages, t, model)
 
 		} else {
@@ -134,7 +135,7 @@ func runConversation(userID int64, telegramBot *tgbotapi.BotAPI, conversation ch
 		if debug {
 			log.Printf("Messages m2: %v", messages)
 		}
-		log.Printf("New Answer from bot %s: %s", userID, botMessage)
+		log.Printf("New Answer from bot %s: %s", user_id_text, botMessage)
 		msg := tgbotapi.NewMessage(userID, botMessage)
 		_, err := telegramBot.Send(msg)
 		if err != nil {
@@ -146,18 +147,19 @@ func runConversation(userID int64, telegramBot *tgbotapi.BotAPI, conversation ch
 func runCommands(command string, args string, messages []openai.Message, temperature float64, model string) (string, []openai.Message, float64) {
 	var botMsg string
 	var commands = map[string]string{
-		"/help":  "show this help",
-		"/reset": "restart the conversation",
-		"/role":  "set the system role",
-		"/temperature":  "model's temperature",
-		"/info":  "information about the bot",
+		"/help":        "show this help",
+		"/reset":       "restart the conversation",
+		"/role":        "set the system role",
+		"/temperature": "model's temperature",
+		"/info":        "information about the bot",
 	}
 
 	switch command {
-	case "/info": {
-		botMsg = fmt.Sprintf("Model: %s\nTemperature: %f\nSystem role: %s", model, temperature, messages[0].Content)
-		return botMsg, messages, temperature
-	}
+	case "/info":
+		{
+			botMsg = fmt.Sprintf("Model: %s\nTemperature: %f\nSystem role: %s", model, temperature, messages[0].Content)
+			return botMsg, messages, temperature
+		}
 	case "/temperature":
 		if args == "" {
 			botMsg = "Syntax is /temperature <float>. What sampling temperature to use, between 0 and 2. Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic. 0.8 is the default."
@@ -165,7 +167,7 @@ func runCommands(command string, args string, messages []openai.Message, tempera
 		}
 		t, err := strconv.ParseFloat(strings.TrimSpace(args), 32)
 		if err != nil {
-			log.Fatal("Error parsing temperature: %s", err)
+			log.Fatal(err)
 		}
 		temperature = t
 		botMsg = fmt.Sprintf("Temperature set to %f", temperature)
