@@ -166,23 +166,22 @@ func runCommands(command string, args string, messages []openai.Message) (string
 func readWhiteList(whitelist *map[int64]bool, file_path string) {
 	file, err := os.Open(file_path)
 	if err != nil {
-			log.Fatal(err)
+		log.Fatal(err)
 	}
 	defer file.Close()
 
-
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-			id := scanner.Text()
-			id_64, err := strconv.ParseInt(id, 10, 64)
-			if err != nil {
-				fmt.Println("Error:", err)
-				return
-			}
-			(*whitelist)[id_64] = true
+		id := scanner.Text()
+		id_64, err := strconv.ParseInt(id, 10, 64)
+		if err != nil {
+			fmt.Println("Error:", err)
+			return
+		}
+		(*whitelist)[id_64] = true
 	}
 
 	if err := scanner.Err(); err != nil {
-			log.Fatal(err)
+		log.Fatal(err)
 	}
 }
