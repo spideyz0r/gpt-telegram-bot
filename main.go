@@ -23,7 +23,10 @@ func main() {
 
 	help := getopt.BoolLong("help", 'h', "display this help")
 	model := getopt.StringLong("model", 'm', "gpt-3.5-turbo", "model. default: gpt-3.5-turbo")
+	temperature := getopt.StringLong("temperature", 't', "0.8", "temperature (default: 0.8)")
 	whitelist_path := getopt.StringLong("whitelist file", 'w', "", "path to file with whitelisted users")
+	openai_key := getopt.StringLong("openai-key", 'a', "", "API key (default: OPENAI_API_KEY environment variable)")
+	telegram_key := getopt.StringLong("telegram-key", 'b', "", "API key (default: TELEGRAM_API_KEY environment variable)")
 	debug := getopt.BoolLong("debug", 'd', "enable debug mode")
 
 	getopt.Parse()
@@ -31,6 +34,14 @@ func main() {
 	if *help {
 		getopt.Usage()
 		os.Exit(0)
+	}
+
+	if *openai_key == "" {
+		*openai_key = os.Getenv("OPENAI_API_KEY")
+	}
+
+	if *telegram_key == "" {
+		*telegram_key = os.Getenv("TELEGRAM_API_KEY")
 	}
 
 	var whitelisted = map[int64]bool{}
@@ -41,7 +52,7 @@ func main() {
 	var conversations = make(map[int64]chan string)
 	var err error
 
-	bot, err := tgbotapi.NewBotAPI(os.Getenv("BOT_KEY"))
+	bot, err := tgbotapi.NewBotAPI(os.Getenv("TELEGRAM_API_KEY"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -58,24 +69,24 @@ func main() {
 
 	for update := range updates {
 		if *whitelist_path != "" && !whitelisted[update.Message.Chat.ID] {
-			fmt.Printf("User %d is not in the whitelist\n", update.Message.Chat.ID)
+			log.Printf("User %d is not in the whitelist\n", update.Message.Chat.ID)
 			continue
 		}
 		conversation, ok := conversations[update.Message.Chat.ID]
 		if !ok {
 			conversation = make(chan string)
 			conversations[update.Message.Chat.ID] = conversation
-			go runConversation(update.Message.Chat.ID, bot, conversation, *debug, *model)
+			go runConversation(update.Message.Chat.ID, bot, conversation, *debug, *model, *temperature, *openai_key)
 		}
 		conversation <- update.Message.Text
 	}
 }
 
-func runConversation(userID int64, telegramBot *tgbotapi.BotAPI, conversation chan string, debug bool, model string) {
+func runConversation(userID int64, telegramBot *tgbotapi.BotAPI, conversation chan string, debug bool, model string, temperature string, apiKey string) {
 	var openai_client *openai.OpenAIClient
 	var botMessage string
+	user_id_text := strconv.FormatInt(userID, 10)
 
-	apiKey := os.Getenv("OPENAI_API_KEY")
 	openai_client = openai.NewOpenAIClient(apiKey)
 
 	messages := []openai.Message{
@@ -85,9 +96,15 @@ func runConversation(userID int64, telegramBot *tgbotapi.BotAPI, conversation ch
 		},
 	}
 
+	t, err := strconv.ParseFloat(temperature, 32)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Model: %s, Temperature: %f", model, t)
+
 	for {
 		userMessage := <-conversation
-		log.Printf("New message from user %i: %s", userID, userMessage)
+		log.Printf("New message from user %s: %s", user_id_text, userMessage)
 		if debug {
 			log.Printf("Messages m1: %v", messages)
 		}
@@ -96,15 +113,15 @@ func runConversation(userID int64, telegramBot *tgbotapi.BotAPI, conversation ch
 			re := regexp.MustCompile(`^/[^ ]+`)
 			command := re.FindString(userMessage)
 			args := re.ReplaceAllString(userMessage, "")
-			log.Printf("New command received %s: command: %s args: %s", userID, command, args)
-			botMessage, messages = runCommands(command, args, messages)
+			log.Printf("New command received %s: command: %s args: %s", user_id_text, command, args)
+			botMessage, messages, t = runCommands(command, args, messages, t, model)
 
 		} else {
 			messages = append(messages, openai.Message{
 				Role:    "user",
 				Content: string(userMessage),
 			})
-			completion, err := openai_client.GetCompletion(model, messages, float32(0.5))
+			completion, err := openai_client.GetCompletion(model, messages, float32(t))
 			if err != nil {
 				log.Printf("Error creating OpenAI completion: %s", err)
 				continue
@@ -118,7 +135,7 @@ func runConversation(userID int64, telegramBot *tgbotapi.BotAPI, conversation ch
 		if debug {
 			log.Printf("Messages m2: %v", messages)
 		}
-		log.Printf("New Answer from bot %s: %s", userID, botMessage)
+		log.Printf("New Answer from bot %s: %s", user_id_text, botMessage)
 		msg := tgbotapi.NewMessage(userID, botMessage)
 		_, err := telegramBot.Send(msg)
 		if err != nil {
@@ -127,19 +144,37 @@ func runConversation(userID int64, telegramBot *tgbotapi.BotAPI, conversation ch
 	}
 }
 
-func runCommands(command string, args string, messages []openai.Message) (string, []openai.Message) {
+func runCommands(command string, args string, messages []openai.Message, temperature float64, model string) (string, []openai.Message, float64) {
 	var botMsg string
 	var commands = map[string]string{
-		"/help":  "show this help",
-		"/reset": "restart the conversation",
-		"/role":  "set the system role",
+		"/help":        "show this help",
+		"/reset":       "restart the conversation",
+		"/role":        "set the system role",
+		"/temperature": "model's temperature",
+		"/info":        "information about the bot",
 	}
 
 	switch command {
+	case "/info":
+		{
+			botMsg = fmt.Sprintf("Model: %s\nTemperature: %f\nSystem role: %s", model, temperature, messages[0].Content)
+			return botMsg, messages, temperature
+		}
+	case "/temperature":
+		if args == "" {
+			botMsg = "Syntax is /temperature <float>. What sampling temperature to use, between 0 and 2. Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic. 0.8 is the default."
+			return botMsg, messages, temperature
+		}
+		t, err := strconv.ParseFloat(strings.TrimSpace(args), 32)
+		if err != nil {
+			log.Fatal(err)
+		}
+		temperature = t
+		botMsg = fmt.Sprintf("Temperature set to %f", temperature)
 	case "/role":
 		if args == "" {
 			botMsg = "Syntax is /role <role>"
-			return botMsg, messages
+			return botMsg, messages, temperature
 		}
 		messages[0] = openai.Message{
 			Role:    "system",
@@ -160,7 +195,7 @@ func runCommands(command string, args string, messages []openai.Message) (string
 			botMsg += fmt.Sprintf("%s: %s\n", k, v)
 		}
 	}
-	return botMsg, messages
+	return botMsg, messages, temperature
 }
 
 func readWhiteList(whitelist *map[int64]bool, file_path string) {
