@@ -185,3 +185,8 @@ func readWhiteList(whitelist *map[int64]bool, file_path string) {
 		log.Fatal(err)
 	}
 }
+
+// Todo:
+// tests
+// build pipeline
+// save history to text feature
