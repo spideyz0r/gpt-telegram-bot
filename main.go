@@ -23,7 +23,10 @@ func main() {
 
 	help := getopt.BoolLong("help", 'h', "display this help")
 	model := getopt.StringLong("model", 'm', "gpt-3.5-turbo", "model. default: gpt-3.5-turbo")
+	temperature := getopt.StringLong("temperature", 't', "0.8", "temperature (default: 0.8)")
 	whitelist_path := getopt.StringLong("whitelist file", 'w', "", "path to file with whitelisted users")
+	openai_key := getopt.StringLong("openai-key", 'a', "", "API key (default: OPENAI_API_KEY environment variable)")
+	telegram_key := getopt.StringLong("telegram-key", 'b', "", "API key (default: TELEGRAM_API_KEY environment variable)")
 	debug := getopt.BoolLong("debug", 'd', "enable debug mode")
 
 	getopt.Parse()
@@ -31,6 +34,14 @@ func main() {
 	if *help {
 		getopt.Usage()
 		os.Exit(0)
+	}
+
+	if *openai_key == "" {
+		*openai_key = os.Getenv("OPENAI_API_KEY")
+	}
+
+	if *telegram_key == "" {
+		*telegram_key = os.Getenv("TELEGRAM_API_KEY")
 	}
 
 	var whitelisted = map[int64]bool{}
@@ -41,7 +52,7 @@ func main() {
 	var conversations = make(map[int64]chan string)
 	var err error
 
-	bot, err := tgbotapi.NewBotAPI(os.Getenv("BOT_KEY"))
+	bot, err := tgbotapi.NewBotAPI(os.Getenv("TELEGRAM_API_KEY"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -58,24 +69,23 @@ func main() {
 
 	for update := range updates {
 		if *whitelist_path != "" && !whitelisted[update.Message.Chat.ID] {
-			fmt.Printf("User %d is not in the whitelist\n", update.Message.Chat.ID)
+			log.Printf("User %d is not in the whitelist\n", update.Message.Chat.ID)
 			continue
 		}
 		conversation, ok := conversations[update.Message.Chat.ID]
 		if !ok {
 			conversation = make(chan string)
 			conversations[update.Message.Chat.ID] = conversation
-			go runConversation(update.Message.Chat.ID, bot, conversation, *debug, *model)
+			go runConversation(update.Message.Chat.ID, bot, conversation, *debug, *model, *temperature, *openai_key)
 		}
 		conversation <- update.Message.Text
 	}
 }
 
-func runConversation(userID int64, telegramBot *tgbotapi.BotAPI, conversation chan string, debug bool, model string) {
+func runConversation(userID int64, telegramBot *tgbotapi.BotAPI, conversation chan string, debug bool, model string, temperature string, apiKey string) {
 	var openai_client *openai.OpenAIClient
 	var botMessage string
 
-	apiKey := os.Getenv("OPENAI_API_KEY")
 	openai_client = openai.NewOpenAIClient(apiKey)
 
 	messages := []openai.Message{
@@ -83,6 +93,11 @@ func runConversation(userID int64, telegramBot *tgbotapi.BotAPI, conversation ch
 			Role:    "system",
 			Content: default_system_role,
 		},
+	}
+
+	t, err := strconv.ParseFloat(temperature, 32)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	for {
@@ -104,7 +119,7 @@ func runConversation(userID int64, telegramBot *tgbotapi.BotAPI, conversation ch
 				Role:    "user",
 				Content: string(userMessage),
 			})
-			completion, err := openai_client.GetCompletion(model, messages, float32(0.5))
+			completion, err := openai_client.GetCompletion(model, messages, float32(t))
 			if err != nil {
 				log.Printf("Error creating OpenAI completion: %s", err)
 				continue
@@ -133,6 +148,7 @@ func runCommands(command string, args string, messages []openai.Message) (string
 		"/help":  "show this help",
 		"/reset": "restart the conversation",
 		"/role":  "set the system role",
+		"/temperature":  "model's temperature",
 	}
 
 	switch command {
