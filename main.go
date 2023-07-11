@@ -43,7 +43,7 @@ func main() {
 
 	bot, err := tgbotapi.NewBotAPI(os.Getenv("BOT_KEY"))
 	if err != nil {
-		log.Panic(err)
+		log.Fatal(err)
 	}
 	log.Printf("Creating bot with name %s", bot.Self.UserName)
 
@@ -52,7 +52,7 @@ func main() {
 
 	updates, err := bot.GetUpdatesChan(updateConfig)
 	if err != nil {
-		log.Panic(err)
+		log.Fatal(err)
 	}
 	log.Printf("Starting to listen for updates")
 
